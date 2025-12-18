@@ -65,7 +65,7 @@
 \maketitle
 
 \begin{abstract}
-  Nash equilibrium play guarantees safety but often leaves value on the table when opponents are exploitable. In this paper, we explore a consistent, optimization-based opponent model, Full Max A Posteriori (FMAP) proposed by \citet{ganzfried2025consistent}, and implement scalable, safe, and adaptive variants for Kuhn poker. FMAP treats opponent modeling as a constrained convex program in sequence form with a Dirichlet-form prior and sparse likelihood derived from partial observations. It satisfies consistency guarantees in terms of eventual convergence to the true opponent model that alternatives such as Bayesian Best Response do not. However, it may not be scalable in terms of game size and iteration count due to its usage of Projected Gradient Descent (PGD) relying on quadratic equation solving. To solve this, in addition to PGD, we implement a Frank-Wolfe (FW) and a stochastic Frank-Wolfe (SFW) variant with optional variance reduction inspired by \citet{hazan2016stochasticfw}. Additionally, we implemented two mechanisms for stability and adaptation (to potentially non-static opponents): an NE-BR mixture heuristic and a $p$-Restricted Nash Response (RNR) option \citep{johanson2007rnash}. On 100-opponent Kuhn benchmarks, naive SFW reduces per-update cost by about $4\times$ relative to PGD (e.g., $24.7$\,ms vs.\ $102.6$\,ms) with a modest degradation in estimation error, while variance-reduced SFW achieves a $\sim$2.7$\times$ speedup ($38.1$\,ms vs.\ $102.6$\,ms) while keeping profit and L2 error close to full-batch solvers. The safety mechanisms trade exploitation for bounded worst-case loss in non-stationary or adversarial settings.
+  Nash equilibrium play guarantees safety but often leaves value on the table when opponents are exploitable. In this paper, we explore a consistent, optimization-based opponent model, Full Max A Posteriori (FMAP) proposed by \citet{ganzfried2025consistent}, and implement scalable, safe, and adaptive variants for Kuhn poker. FMAP treats opponent modeling as a constrained convex program in sequence form with a Dirichlet-form prior and sparse likelihood derived from partial observations. It satisfies consistency guarantees in terms of eventual convergence to the true opponent model that alternatives such as Bayesian Best Response do not. However, it may not be scalable in terms of game size and iteration count due to its usage of Projected Gradient Descent (PGD) relying on quadratic programming. To solve this, in addition to PGD, we implement a Frank-Wolfe (FW) and a stochastic Frank-Wolfe (SFW) variant with optional variance reduction inspired by \citet{hazan2016stochasticfw}. Additionally, we implemented two mechanisms for stability and adaptation (to potentially non-static opponents): an NE-BR mixture heuristic and a $p$-Restricted Nash Response (RNR) option \citep{johanson2007rnash}. On 100-opponent Kuhn benchmarks, naive SFW reduces per-update cost by about $4\times$ relative to PGD (e.g., $24.7$\,ms vs.\ $102.6$\,ms) with a modest degradation in estimation error, while variance-reduced SFW achieves a $\sim$2.7$\times$ speedup ($38.1$\,ms vs.\ $102.6$\,ms) while keeping profit and L2 error close to full-batch solvers. The safety mechanisms trade exploitation for bounded worst-case loss in non-stationary or adversarial settings.
 \end{abstract}
 
 \section{Introduction}
@@ -138,18 +138,17 @@ because at each hand we only know that the opponent chose a sequence in $\mathca
 + \sum_{t=1}^{T} \log \Big( \sum_{j \in \mathcal{O}_t} q_{t,j} y_j \Big) + \text{const}.
 \]
 
-FMAP \citep{ganzfried2025consistent} defines the opponent model as the posterior mode in sequence form. In our implementation, we optionally add an entropy regularizer for numerical stability:
+FMAP \citep{ganzfried2025consistent} defines the opponent model as the posterior mode in sequence form. The given FMAP objective is
 \begin{align}
 \label{eq:fmap}
-\max_{y \ge 0, \; Fy = f} \quad & \sum_{i=1}^{n} (\alpha_i - 1)\log y_i + \sum_{t=1}^{T} \log \Big( \sum_{j \in \mathcal{O}_t} q_{t,j} y_j \Big) \nonumber \\
-& \quad - \lambda \sum_{i=1}^{n} y_i \log y_i,
+\max_{y \ge 0, \; Fy = f} \quad & \sum_{i=1}^{n} (\alpha_i - 1)\log y_i + \sum_{t=1}^{T} \log \Big( \sum_{j \in \mathcal{O}_t} q_{t,j} y_j \Big).
 \end{align}
-where $\lambda \ge 0$ is an optional entropy weight. In implementation we minimize the \emph{negative} of \eqref{eq:fmap}, so the gradient used for optimization is
+In implementation we minimize the \emph{negative} of \eqref{eq:fmap}, so the gradient used for optimization is
 \begin{equation}
 \label{eq:grad}
-\nabla_i = \frac{1 - \alpha_i}{y_i} - \sum_{t: i \in \mathcal{O}_t} \frac{q_{t,i}}{\sum_{j \in \mathcal{O}_t} q_{t,j} y_j} + \lambda (1 + \log y_i),
+\nabla_i = \frac{1 - \alpha_i}{y_i} - \sum_{t: i \in \mathcal{O}_t} \frac{q_{t,i}}{\sum_{j \in \mathcal{O}_t} q_{t,j} y_j}.
 \end{equation}
-where the final term is the contribution of our added entropy regularizer. We discuss entropy regularization and discounted likelihood as optional extensions in Section~\ref{sec:safety}.
+We also discuss discounted likelihood and entropy regularization as optional stability and adaptation mechanisms in Section~\ref{sec:safety}, which modify the FMAP objective.
 
 \subsection{Solvers}
 \label{sec:solvers}
@@ -210,13 +209,12 @@ We now separate (i) optimization guarantees for fixed data and (ii) solver-agnos
 
 Let $\mathcal{D} = \{y \in \R^{n} : Fy = f,\; y_i > 0\}$ denote the (relative) interior of the sequence-form polytope. In implementation we enforce a numerical floor $y_i \ge \varepsilon$; one can interpret this as optimizing over $\mathcal{D}_{\varepsilon_T}=\{y:Fy=f,\; y_i\ge \varepsilon_T\}$ where $\varepsilon_T\downarrow 0$ as $T$ grows.
 
-For theoretical clarity we define the \emph{minimization} form of the negative regularized log-posterior:
+For theoretical clarity we define the \emph{minimization} form of the negative log-posterior (per sample):
 \[
 F_T(y) \;=\; -\frac{1}{T}\sum_{t=1}^{T} \log \Big( \sum_{j \in \mathcal{O}_t} q_{t,j} y_j \Big)
-\;-\;\frac{1}{T}\sum_{i=1}^{n} (\alpha_i - 1)\log y_i
-\;+\;\lambda R(y),
+\;-\;\frac{1}{T}\sum_{i=1}^{n} (\alpha_i - 1)\log y_i.
 \]
-where $R(y) = \sum_i y_i \log y_i$ is the entropy regularizer. Up to an additive constant and positive scalar multiple, minimizing $F_T$ is equivalent to maximizing \eqref{eq:fmap}.
+Up to an additive constant and positive scalar multiple, minimizing $F_T$ is equivalent to maximizing \eqref{eq:fmap}.
 
 \subsubsection{Optimization guarantees for fixed data}
 
@@ -228,16 +226,16 @@ F_T(y_k) \;\to\; F_T(\hat{y}_T)
 as $k \to \infty$, where $\hat{y}_T = \arg\min_{y \in \mathcal{D}_{\varepsilon}} F_T(y)$ is the empirical minimizer. The mode of convergence (deterministic, in expectation, or almost surely) depends on the algorithm.
 \end{definition}
 
-\begin{proposition}[Strict convexity]
-If $\lambda > 0$, then for each fixed $T$ the objective $F_T(y)$ is strictly convex on $\mathcal{D}_{\varepsilon}$ and therefore has a unique minimizer $\hat{y}_T$.
+\begin{proposition}[Strict convexity under $\alpha_i>1$]
+If $\alpha_i>1$ for all $i$, then for each fixed $T$ the objective $F_T(y)$ is strictly convex on $\mathcal{D}_{\varepsilon}$ and therefore has a unique minimizer $\hat{y}_T$.
 \end{proposition}
 \begin{proof}
-For each $t$, the map $y \mapsto \log\big(\sum_{j\in\mathcal{O}_t} q_{t,j}y_j\big)$ is concave on $\{y\ge 0\}$, hence its negation is convex on $\mathcal{D}_\varepsilon$. The log-prior term $y \mapsto \sum_i (\alpha_i-1)\log y_i$ is concave on $\{y_i>0\}$ when $\alpha_i\ge 1$, so its negation is convex on $\mathcal{D}_\varepsilon$. Finally, $R(y)=\sum_i y_i\log y_i$ is strictly convex on $\{y_i>0\}$, and restricting a strictly convex function to an affine slice preserves strict convexity. Thus $F_T$ is the sum of convex terms plus $\lambda R(y)$ with $\lambda>0$, hence strictly convex with a unique minimizer.
+For each $t$, the map $y \mapsto \log\big(\sum_{j\in\mathcal{O}_t} q_{t,j}y_j\big)$ is concave on $\{y\ge 0\}$, hence its negation is convex on $\mathcal{D}_\varepsilon$. The prior term contributes $-\sum_i (\alpha_i-1)\log y_i$; when $\alpha_i>1$ this is a strictly convex function of $y$ on $\{y_i>0\}$. A sum of a strictly convex function and a convex function is strictly convex, and restricting a strictly convex function to a convex set preserves strict convexity. Thus $F_T$ is strictly convex on $\mathcal{D}_\varepsilon$ and has a unique minimizer.
 \end{proof}
 
 \begin{proposition}[Algorithmic convergence of PGD and deterministic FW; expectation guarantees for stochastic variants]
 \label{prop:alg-conv}
-Let $\hat{y}_T = \arg\min_{y \in \mathcal{D}_\varepsilon} F_T(y)$ be the unique empirical minimizer for a fixed sample size $T$ (with $\lambda>0$).
+Let $\hat{y}_T = \arg\min_{y \in \mathcal{D}_\varepsilon} F_T(y)$ be the unique empirical minimizer for a fixed sample size $T$ (e.g., when $\alpha_i>1$ for all $i$).
 \begin{enumerate}
     \item \textbf{PGD:} Under standard assumptions (Lipschitz gradients and suitable step sizes), projected gradient descent converges to $\hat{y}_T$ on compact convex sets.
     \item \textbf{Deterministic FW:} Under smoothness, the Frank-Wolfe algorithm with appropriate step sizes satisfies
@@ -264,7 +262,7 @@ We assume the setting analyzed by \citet{ganzfried2025consistent}:
 \begin{enumerate}
     \item The opponent's strategy $y^\star$ is drawn from the Dirichlet-form prior and held fixed across hands.
     \item The game has perfect recall and admits a sequence-form representation; observations are generated by repeated play under $y^\star$, with exact observability mappings $\mathcal{O}_t$.
-    \item There is no discounting ($\gamma=1$) and no entropy regularization ($\lambda=0$) in the FMAP objective.
+    \item There is no discounting ($\gamma=1$) and no entropy regularization in the FMAP objective.
 \end{enumerate}
 \end{assumption}
 
@@ -272,7 +270,7 @@ Under Assumption~\ref{assump:static}, $F_T$ is the negative log-posterior (up to
 
 \begin{theorem}[Solver-agnostic consistency of FMAP]
 \label{thm:solver-agnostic-consistency}
-Suppose Assumption~\ref{assump:static} holds. Let $F_T$ be the FMAP objective with $\lambda=0$ defined on $\mathcal{D}=\{y: Fy=f,\; y_i>0\}$, and let $\hat{y}_T \in \arg\min_{y \in \mathcal{D}} F_T(y)$ denote the exact FMAP estimator. Let $y_T$ be the (possibly random) output of any optimization algorithm (PGD, FW, SFW, or a hybrid) run on $F_T$ such that for some sequence $\delta_T \downarrow 0$,
+Suppose Assumption~\ref{assump:static} holds. Let $F_T$ be the FMAP objective defined on $\mathcal{D}_{\varepsilon}=\{y: Fy=f,\; y_i\ge \varepsilon\}$, and let $\hat{y}_T \in \arg\min_{y \in \mathcal{D}} F_T(y)$ denote the exact FMAP estimator. Let $y_T$ be the (possibly random) output of any optimization algorithm (PGD, FW, SFW, or a hybrid) run on $F_T$ such that for some sequence $\delta_T \downarrow 0$,
 \[
 F_T(y_T) \;\le\; \inf_{y \in \mathcal{D}} F_T(y) + \delta_T
 \]
@@ -382,7 +380,7 @@ The results reflect a clear exploitation-safety trade-off. In the typical static
 
 \subsection{Adaptation and stability}
 
-Discounted likelihood ($\gamma=0.95$) improves recovery after opponent switches by emphasizing fresh observations, at the cost of a small steady-state bias. Entropy regularization ($\lambda>0$) reduces variance in stochastic gradients and empirically lowers oscillations in SFW at large batch sizes. Theoretically, these tools could further yield stable learning curves in the presence of non-stationary or adversarial opponents, but require further empirical study.
+Discounted likelihood ($\gamma=0.95$) improves recovery after opponent switches by emphasizing fresh observations, at the cost of a small steady-state bias. Entropy regularization can reduce variance in stochastic updates and empirically lower oscillations in SFW at large batch sizes. Theoretically, these tools could further yield stable learning curves in the presence of non-stationary or adversarial opponents, but require further empirical study.
 
 \section{Discussion}
 \label{sec:discussion}
@@ -401,7 +399,6 @@ As mentioned above, a large motivation of our work is scaling FMAP to larger, im
 
 \section{Conclusion}
 \label{sec:conclusion}
-
 
 We presented an optimization-driven framework for opponent modeling in imperfect-information games. By pairing FMAP with projection-free solvers, stochastic variance reduction, NE-BR mixing and p-RNR safety mechanisms, and discounting, we achieve fast updates, competitive exploitation, and improved robustness in Kuhn poker. Importantly, the use of FW and SFW does not alter FMAP's core consistency guarantee in the static-opponent setting: any solver that approximately minimizes the FMAP objective shares the same asymptotic target as the original PGD-based algorithm, while sampling-based BBR fundamentally does not. Future work includes integrating CFR-style regret updates, extending to larger poker variants, and deploying the model within real-time play.
 \bibliographystyle{plainnat}
