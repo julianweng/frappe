@@ -117,8 +117,7 @@ opponent-modeling/
         ├── __init__.py
         ├── dealer.py      # Card dealing & game logic
         └── runner.py      # Experiment orchestration
-├── tests/                 # Unit tests
-├── examples/              # Example scripts
+├── examples/              # Example scripts including experiments
 ├── pyproject.toml         # Project configuration
 └── README.md
 ```
