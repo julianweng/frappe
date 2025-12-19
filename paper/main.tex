@@ -205,7 +205,7 @@ PGD projects via a QP at every step. Projection cost grows poorly with game size
 \subsection{Convergence and consistency}
 \label{sec:conv-consistency}
 
-We now separate (i) optimization guarantees for fixed data and (ii) solver-agnostic statistical consistency as the number of hands grows. We prove that the former is in expectation correct for all solvers, with caveats for stochastic-based methods (that could be negligible in practice), while the latter applies to all solvers so maintains the primary advantage of the FMAP algorithm.
+We now separate (i) optimization guarantees for fixed data and (ii) solver-agnostic statistical consistency as the number of hands grows. We prove that the former is in expectation correct for all solvers, with caveats for stochastic-based methods (that could be negligible in practice), while the latter applies to all solvers and thus maintains the primary advantage of the FMAP algorithm.
 
 Let $\mathcal{D} = \{y \in \R^{n} : Fy = f,\; y_i > 0\}$ denote the (relative) interior of the sequence-form polytope. In implementation we enforce a numerical floor $y_i \ge \varepsilon$; one can interpret this as optimizing over $\mathcal{D}_{\varepsilon_T}=\{y:Fy=f,\; y_i\ge \varepsilon_T\}$ where $\varepsilon_T\downarrow 0$ as $T$ grows.
 
@@ -314,7 +314,7 @@ Table~\ref{tab:solver} reports the final solver comparison (100 opponents, 3{,}0
 
 \begin{table}[ht]
 \centering
-\caption{Solver comparison (final preset, Kuhn poker).}
+\caption{Solver comparison (Kuhn poker, 100 opponents, 3{,}000 hands).}
 \label{tab:solver}
 \begin{tabular}{lccc}
 \toprule
@@ -346,7 +346,7 @@ FMAP-SFW-SVRG-200 & 0.5526 & 0.303762 & 45.81 \\
 \label{fig:final_curves}
 \end{figure}
 
-Across solvers, final profit is similar (Table~\ref{tab:solver}), while naive SFW exhibits higher L2 error that is reduced by variance reduction (Figure~\ref{fig:final_curves}). Final profit is similar (likely the same within a margin of error, which is why it appears uncorrelated with L2 error) as these solvers perform relatively similar to each other in practice. However, this could be masked by the extremely limited action set in Kuhn poker, so even substantial differences in opponent model could result in similar best-action. Hence, we decided to focus on minimizing L2 error which more directly represents model quality.
+Across solvers, final profit is similar (Table~\ref{tab:solver}), while naive SFW exhibits higher L2 error that is reduced by variance reduction (Figure~\ref{fig:final_curves}). Final profit differences across solvers are small and likely within statistical noise, which may explain why profit appears uncorrelated with L2 error. However, Kuhn poker's limited action space may cause different opponent models to yield similar best responses. We therefore focus on L2 error as a more direct measure of model quality.
 
 Quantitatively, SVRG reduces SFW's L2 error by 8-11\% (from 0.359 to 0.321 for batch-100, from 0.330 to 0.304 for batch-200) while adding modest computational cost (54-58\% time overhead respectively). A Pareto-efficient accuracy-efficiency trade-off is achieved by SFW-SVRG-200, which matches FW's accuracy (L2 $\approx$ 0.304) at one-third the update time (46 vs 137 ms). The per-iteration update time scales linearly as more observations accumulate for PGD, while FW-based methods exhibit sublinear scaling such that PGD timings approach that of vanilla-FW, which itself is still much slower than any form of stochastic FW.
 
@@ -393,7 +393,7 @@ Discounted likelihood ($\gamma=0.95$) improves recovery after opponent switches 
 
 \paragraph{Limitations.} Kuhn poker is intentionally small; scaling FMAP to larger games might require abstraction, hierarchical solvers, or approximate sequence-form representations, which require care to maintain FMAP's consistency in practice and not defeat the point of its existence. We assume correct observability mappings and unbiased sampling; extending to noisy or partial logging environments is an interesting avenue for future work. Finally, computing a Nash anchor in larger games is itself challenging and may necessitate approximate equilibrium computation.
 
-In addition, due to time and scope constraints, we were not able to empirically validate our implementation of discounted likelihood or entropy reduction.
+While we implemented discounted likelihood and entropy regularization, their systematic empirical evaluation presents a promising avenue for future exploration.
 
 As mentioned above, a large motivation of our work is scaling FMAP to larger, imperfect information games such as Texas Hold'em. While we saw that through many iterations, our FW-based solvers exhibited favorable performance scaling relative to PGD-based methods, testing larger games and more iterations explicitly would be worthwhile to confirm our thesis.
 
